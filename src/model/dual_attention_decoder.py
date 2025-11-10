@@ -77,8 +77,8 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
                                → Secondary Cross-Attn (noise) ──┼→ Gate → FFN → Output
     """
     
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, layer_idx: Optional[int] = None):
+        super().__init__(config, layer_idx=layer_idx)
         
         # Add secondary cross-attention head (same architecture as primary)
         self.encoder_attn_secondary = WhisperAttention(
@@ -87,6 +87,8 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
             dropout=config.attention_dropout,
             is_decoder=True,
             is_causal=False,
+            layer_idx=layer_idx,
+            config=config,
         )
         
         # Layer norm for secondary cross-attention
@@ -103,9 +105,10 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
         encoder_attention_mask: Optional[torch.Tensor] = None,
         layer_head_mask: Optional[torch.Tensor] = None,
         cross_attn_layer_head_mask: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        past_key_values: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = True,
+        cache_position: Optional[torch.LongTensor] = None,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
         Forward pass with dual cross-attention.
@@ -115,6 +118,8 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
             attention_mask: Causal mask for self-attention
             encoder_hidden_states: Encoder output [batch, enc_seq_len, hidden]
             encoder_attention_mask: Mask for encoder outputs
+            past_key_values: Cached key/values for generation
+            cache_position: Position in cache
             ...
             
         Returns:
@@ -124,13 +129,26 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
         
         # 1. Self-Attention (standard)
         hidden_states = self.self_attn_layer_norm(hidden_states)
-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
-            hidden_states=hidden_states,
-            past_key_value=past_key_value,
-            attention_mask=attention_mask,
-            layer_head_mask=layer_head_mask,
-            output_attentions=output_attentions,
-        )
+        
+        # Prepare self-attention kwargs
+        self_attn_kwargs = {
+            "hidden_states": hidden_states,
+            "attention_mask": attention_mask,
+            "layer_head_mask": layer_head_mask,
+            "output_attentions": output_attentions,
+        }
+        if past_key_values is not None:
+            self_attn_kwargs["past_key_values"] = past_key_values
+        if cache_position is not None:
+            self_attn_kwargs["cache_position"] = cache_position
+            
+        # WhisperAttention returns (hidden_states, attn_weights) in newer versions
+        attn_output = self.self_attn(**self_attn_kwargs)
+        if len(attn_output) == 2:
+            hidden_states, self_attn_weights = attn_output
+            present_key_value = None
+        else:
+            hidden_states, self_attn_weights, present_key_value = attn_output
         hidden_states = nn.functional.dropout(
             hidden_states, p=self.dropout, training=self.training
         )
@@ -142,26 +160,34 @@ class DualAttentionDecoderLayer(WhisperDecoderLayer):
             
             # 2a. Primary Cross-Attention (for speech)
             hidden_states_primary = self.encoder_attn_layer_norm(hidden_states)
-            hidden_states_primary, cross_attn_weights_primary, _ = self.encoder_attn(
+            primary_attn_output = self.encoder_attn(
                 hidden_states=hidden_states_primary,
                 key_value_states=encoder_hidden_states,
                 attention_mask=encoder_attention_mask,
                 layer_head_mask=cross_attn_layer_head_mask,
                 output_attentions=output_attentions,
             )
+            if len(primary_attn_output) == 2:
+                hidden_states_primary, cross_attn_weights_primary = primary_attn_output
+            else:
+                hidden_states_primary, cross_attn_weights_primary, _ = primary_attn_output
             hidden_states_primary = nn.functional.dropout(
                 hidden_states_primary, p=self.dropout, training=self.training
             )
             
             # 2b. Secondary Cross-Attention (for noise)
             hidden_states_secondary = self.encoder_attn_secondary_layer_norm(hidden_states)
-            hidden_states_secondary, cross_attn_weights_secondary, _ = self.encoder_attn_secondary(
+            secondary_attn_output = self.encoder_attn_secondary(
                 hidden_states=hidden_states_secondary,
                 key_value_states=encoder_hidden_states,
                 attention_mask=encoder_attention_mask,
                 layer_head_mask=cross_attn_layer_head_mask,
                 output_attentions=output_attentions,
             )
+            if len(secondary_attn_output) == 2:
+                hidden_states_secondary, cross_attn_weights_secondary = secondary_attn_output
+            else:
+                hidden_states_secondary, cross_attn_weights_secondary, _ = secondary_attn_output
             hidden_states_secondary = nn.functional.dropout(
                 hidden_states_secondary, p=self.dropout, training=self.training
             )
@@ -213,7 +239,7 @@ class DualAttentionWhisperDecoder(WhisperDecoder):
         
         # Replace standard decoder layers with dual-attention layers
         self.layers = nn.ModuleList(
-            [DualAttentionDecoderLayer(config) for _ in range(config.decoder_layers)]
+            [DualAttentionDecoderLayer(config, layer_idx=i) for i in range(config.decoder_layers)]
         )
         
         # Re-initialize weights (important!)

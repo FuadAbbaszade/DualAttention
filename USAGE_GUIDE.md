@@ -49,7 +49,48 @@ Your data should be in JSON format with the following structure:
 ]
 ```
 
-### Option 1: Auto-Prepare from Audio Files
+### Option 1: Using Hugging Face Datasets (Recommended)
+
+The easiest way to get started is to use a dataset from Hugging Face:
+
+```bash
+python scripts/prepare_data.py \
+    --hf_dataset LocalDoc/azerbaijani_asr \
+    --hf_split train \
+    --hf_audio_column audio \
+    --hf_text_column text \
+    --language az \
+    --output_dir ./data/azerbaijani_asr
+```
+
+**Options:**
+- `--hf_dataset`: Hugging Face dataset name (e.g., `LocalDoc/azerbaijani_asr`)
+- `--hf_split`: Dataset split to use (default: `train`)
+- `--hf_audio_column`: Column containing audio data (default: `audio`)
+- `--hf_text_column`: Column containing transcriptions (default: `text`)
+- `--cache_dir`: Directory to cache the downloaded dataset (default: `~/.cache/huggingface/datasets`)
+- `--max_samples`: Limit number of samples for testing (optional)
+
+**Example with all options:**
+```bash
+python scripts/prepare_data.py \
+    --hf_dataset mozilla-foundation/common_voice_11_0 \
+    --hf_config az \
+    --hf_split train \
+    --hf_audio_column audio \
+    --hf_text_column sentence \
+    --language az \
+    --min_duration 1.0 \
+    --max_duration 20.0 \
+    --output_dir ./data/common_voice_az
+```
+
+The dataset will be:
+- Downloaded once and cached locally
+- Automatically processed and split into train/eval sets (90/10 split)
+- Saved as `train.json` and `eval.json` in the output directory
+
+### Option 2: Auto-Prepare from Local Audio Files
 
 If you have audio files and a separate transcript file:
 
@@ -80,7 +121,7 @@ audio1.wav	first transcription
 audio2.wav	second transcription
 ```
 
-### Option 2: Manual Preparation
+### Option 3: Manual Preparation
 
 Create `train.json` and `eval.json` files manually:
 
@@ -94,39 +135,77 @@ mkdir -p data/processed
 
 ## 🏋️ Training
 
+### GPU Requirements
+
+**Memory requirements by model size:**
+
+| Model | Params | Batch 8 | Batch 16 | Batch 24 | Recommended GPU |
+|-------|--------|---------|----------|----------|------------------|
+| whisper-tiny | 39M | 4 GB | 6 GB | 8 GB | RTX 3060 12GB+ |
+| whisper-small | 244M | 8 GB | 12 GB | 16 GB | RTX 3090 24GB / A100 40GB |
+| whisper-medium | 769M | 16 GB | 32 GB | 40 GB+ | A100 40GB |
+| whisper-large | 1.5B | 20 GB | 40 GB+ | OOM | A100 80GB |
+
+*With FP16 training. Dual-attention adds ~30% more parameters than standard Whisper.*
+
 ### Basic Training (Recommended Start)
 
 ```bash
 python scripts/train.py \
-    --model_name openai/whisper-small \
-    --train_data ./data/processed/train.json \
-    --eval_data ./data/processed/eval.json \
-    --output_dir ./outputs/experiment1 \
+    --train_data data/azerbaijani_asr/train.json \
+    --eval_data data/azerbaijani_asr/eval.json \
     --language az \
-    --freeze_encoder \
-    --max_steps 10000 \
+    --model_name openai/whisper-small \
+    --output_dir outputs/azerbaijani_asr \
     --per_device_train_batch_size 16 \
-    --learning_rate 5e-6
+    --num_train_epochs 3 \
+    --eval_steps 5000 \
+    --save_steps 5000 \
+    --logging_steps 100
 ```
 
-### Training with Your Configuration (From Your Example)
+**Key arguments:**
+- `--num_train_epochs`: Number of full passes through the dataset (recommended: 3-5)
+- `--max_steps`: Alternative to epochs, set maximum training steps
+- `--per_device_train_batch_size`: Adjust based on GPU memory (see table above)
+- `--freeze_encoder`: Freeze encoder weights (default: True, recommended for faster training)
 
+### Training Different Model Sizes
+
+**Whisper-small (fastest, good quality):**
 ```bash
 python scripts/train.py \
+    --train_data data/azerbaijani_asr/train.json \
+    --eval_data data/azerbaijani_asr/eval.json \
     --model_name openai/whisper-small \
-    --train_data ./data/processed/train.json \
-    --eval_data ./data/processed/eval.json \
-    --output_dir ./outputs \
+    --output_dir outputs/whisper_small \
     --language az \
-    --freeze_encoder \
     --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 32 \
-    --learning_rate 5e-6 \
-    --warmup_steps 1000 \
-    --max_steps 10000 \
-    --eval_steps 1000 \
-    --save_steps 1000 \
-    --logging_steps 10
+    --num_train_epochs 3
+```
+
+**Whisper-medium (best quality for A100 40GB):**
+```bash
+python scripts/train.py \
+    --train_data data/azerbaijani_asr/train.json \
+    --eval_data data/azerbaijani_asr/eval.json \
+    --model_name openai/whisper-medium \
+    --output_dir outputs/whisper_medium \
+    --language az \
+    --per_device_train_batch_size 12 \
+    --num_train_epochs 3
+```
+
+**Whisper-tiny (for testing on limited hardware):**
+```bash
+python scripts/train.py \
+    --train_data data/azerbaijani_asr/train.json \
+    --eval_data data/azerbaijani_asr/eval.json \
+    --model_name openai/whisper-tiny \
+    --output_dir outputs/whisper_tiny \
+    --language az \
+    --per_device_train_batch_size 32 \
+    --num_train_epochs 3
 ```
 
 ### Multi-GPU Training
@@ -254,12 +333,14 @@ print(transcription)
 ### Evaluate on Test Set
 
 ```bash
-python scripts/evaluate.py \
+python scripts/run_evaluation.py \
     --model_path ./outputs/checkpoint-10000 \
     --test_data ./data/processed/eval.json \
     --language az \
     --output_file evaluation_results.txt
 ```
+
+**Note:** The evaluation script was renamed to `run_evaluation.py` to avoid name collision with the `evaluate` Python package.
 
 This will output:
 - WER (Word Error Rate)
@@ -430,7 +511,7 @@ python scripts/train.py \
     --max_steps 10000
 
 # 3. Evaluate
-python scripts/evaluate.py \
+python scripts/run_evaluation.py \
     --model_path ./outputs/checkpoint-10000 \
     --test_data ./data/processed/eval.json \
     --language az
@@ -473,10 +554,10 @@ python scripts/inference.py --model_path MODEL --audio_path DIR --output_file OU
 
 ```bash
 # Standard evaluation
-python scripts/evaluate.py --model_path MODEL --test_data DATA
+python scripts/run_evaluation.py --model_path MODEL --test_data DATA
 
 # With output file
-python scripts/evaluate.py --model_path MODEL --test_data DATA --output_file results.txt
+python scripts/run_evaluation.py --model_path MODEL --test_data DATA --output_file results.txt
 ```
 
 ---

@@ -10,7 +10,23 @@ pip install -e .
 
 ## Data Preparation
 
-### Option 1: Prepare your own data
+### Option 1: Use Hugging Face Dataset (Easiest)
+
+The fastest way to get started:
+
+```bash
+python scripts/prepare_data.py \
+    --hf_dataset LocalDoc/azerbaijani_asr \
+    --hf_split train \
+    --hf_audio_column audio \
+    --hf_text_column text \
+    --language az \
+    --output_dir ./data/azerbaijani_asr
+```
+
+The dataset will be downloaded, cached, and automatically split into train/eval sets.
+
+### Option 2: Prepare your own data
 
 1. Organize your audio files in a directory:
 ```
@@ -38,7 +54,7 @@ python scripts/prepare_data.py \
     --language az
 ```
 
-### Option 2: Use existing dataset format
+### Option 3: Use existing dataset format
 
 Create JSON files directly:
 
@@ -144,12 +160,14 @@ python scripts/inference.py \
 ## Evaluation
 
 ```bash
-python scripts/evaluate.py \
+python scripts/run_evaluation.py \
     --model_path ./outputs/checkpoint-10000 \
     --test_data ./data/processed/eval.json \
     --language az \
     --output_file evaluation_results.txt
 ```
+
+**Note:** The script was renamed to `run_evaluation.py` to avoid naming conflicts.
 
 ## Python API Usage
 
@@ -257,16 +275,29 @@ gradient_checkpointing=True
 4. Unfreeze encoder after initial training
 5. Reduce learning rate: `--learning_rate 1e-6`
 
+## GPU Requirements
+
+**Quick reference for model selection:**
+
+| GPU | Recommended Model | Batch Size |
+|-----|------------------|------------|
+| RTX 3060 12GB | whisper-tiny | 16-24 |
+| RTX 3090 24GB | whisper-small | 12-16 |
+| A100 40GB | whisper-small | 16-24 |
+| A100 40GB | whisper-medium | 12 |
+| A100 80GB | whisper-large | 8 |
+
 ## Tips for Best Results
 
 1. **Freeze encoder initially**: Let the dual-attention decoder adapt first
-2. **Use clean + noisy data**: Mix clean and noisy samples in training
-3. **Data augmentation**: Enable noise injection in data collator
-4. **Fine-tune in stages**:
+2. **Choose right model size**: Start with whisper-small for A100 40GB
+3. **Use appropriate batch size**: See GPU requirements table above
+4. **Train with epochs**: Use `--num_train_epochs 3` for complete training
+5. **Fine-tune in stages**:
    - Stage 1: Freeze encoder, train decoder (5k steps)
    - Stage 2: Unfreeze encoder, full fine-tuning (5k steps)
-5. **Monitor overfitting**: Watch eval WER, use early stopping
-6. **Language-specific tokens**: Always set `--language` correctly
+6. **Monitor overfitting**: Watch eval WER, use early stopping
+7. **Language-specific tokens**: Always set `--language` correctly
 
 ## Next Steps
 
