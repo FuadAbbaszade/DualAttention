@@ -1,0 +1,20 @@
+[
+  {
+    "audio_path": "/path/to/audio/sample1.wav",
+    "text": "bu bir test cümləsidir",
+    "language": "az",
+    "duration": 2.5
+  },
+  {
+    "audio_path": "/path/to/audio/sample2.wav",
+    "text": "ikinci nümunə mətni",
+    "language": "az",
+    "duration": 3.1
+  },
+  {
+    "audio_path": "/path/to/audio/sample3.wav",
+    "text": "üçüncü audio faylının transkripsiyası",
+    "language": "az",
+    "duration": 4.7
+  }
+]

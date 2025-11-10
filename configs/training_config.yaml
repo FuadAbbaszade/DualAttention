@@ -1,0 +1,83 @@
+# Training Configuration for Dual-Attention Whisper
+
+# Model settings
+model:
+  name: "openai/whisper-small"  # tiny, small, medium, large, large-v2
+  freeze_encoder: true
+  freeze_primary_decoder: false
+
+# Data settings
+data:
+  train_data: "./data/processed/train.json"
+  eval_data: "./data/processed/eval.json"
+  language: "az"  # Language code (ISO 639-1)
+  task: "transcribe"  # transcribe or translate
+  max_audio_length: 30.0  # seconds
+
+# Training hyperparameters
+training:
+  output_dir: "./outputs"
+  
+  # Optimization
+  learning_rate: 5.0e-6
+  weight_decay: 0.01
+  warmup_steps: 1000
+  max_steps: 10000
+  num_train_epochs: null  # Use max_steps if null
+  
+  # Batch size
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 1
+  
+  # Evaluation
+  eval_strategy: "steps"
+  eval_steps: 1000
+  
+  # Checkpointing
+  save_strategy: "steps"
+  save_steps: 1000
+  save_total_limit: 5
+  load_best_model_at_end: true
+  metric_for_best_model: "wer"
+  greater_is_better: false
+  
+  # Generation during evaluation
+  predict_with_generate: true
+  generation_max_length: 100
+  generation_num_beams: 1  # 1 for speed, 5 for quality
+  
+  # Logging
+  logging_steps: 10
+  logging_first_step: true
+  report_to: "tensorboard"  # tensorboard, wandb, none
+  
+  # Performance optimizations
+  fp16: true
+  fp16_full_eval: true
+  tf32: true
+  dataloader_num_workers: 16
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: true
+  gradient_checkpointing: false
+  optim: "adamw_torch_fused"
+  
+  # Multi-GPU
+  ddp_find_unused_parameters: false
+  ddp_bucket_cap_mb: 25
+
+# Data augmentation (optional)
+augmentation:
+  add_noise: true
+  noise_level: 0.01
+  noise_prob: 0.5
+  speed_perturb: false
+  speed_range: [0.9, 1.1]
+
+# Inference settings
+inference:
+  num_beams: 5
+  max_length: 448
+  temperature: 1.0
+  top_k: 50
+  top_p: 1.0
